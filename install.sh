@@ -23,10 +23,12 @@ echo "Installing ESV Bible Verses extension…"
 mkdir -p "$DEST/schemas"
 
 # 2. Copy extension files
-cp metadata.json  "$DEST/"
-cp extension.js   "$DEST/"
-cp prefs.js       "$DEST/"
-cp stylesheet.css "$DEST/"
+cp metadata.json    "$DEST/"
+cp extension.js     "$DEST/"
+cp prefs.js         "$DEST/"
+cp stylesheet.css   "$DEST/"
+cp bible-browser.js "$DEST/"
+chmod +x "$DEST/bible-browser.js"
 cp schemas/org.gnome.shell.extensions.esv-bible-verses.gschema.xml \
    "$DEST/schemas/"
 

@@ -3,7 +3,7 @@ import Gtk from 'gi://Gtk';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/shell/extensions/prefs.js';
+import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class ESVBiblePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {

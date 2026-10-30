@@ -10,6 +10,24 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+// ─── Bible Browser launcher ───────────────────────────────────────────────────
+// Spawns bible-browser.js as a separate GJS process so it can open a GTK4
+// window outside the shell compositor process.
+function launchBibleBrowser(extensionPath, apiKey) {
+    const scriptPath = GLib.build_filenamev([extensionPath, 'bible-browser.js']);
+    try {
+        const proc = Gio.Subprocess.new(
+            ['gjs', '-m', scriptPath, '--api-key', apiKey || ''],
+            Gio.SubprocessFlags.NONE
+        );
+        // We don't need to wait for it; it manages its own event loop.
+        proc.wait_async(null, null);
+    } catch (e) {
+        Main.notify('ESV Bible', `Could not open Bible Browser: ${e.message}`);
+        console.error('[ESVBible] launchBibleBrowser:', e);
+    }
+}
+
 // ─── Default verse list ───────────────────────────────────────────────────────
 const DEFAULT_VERSES = [
     'John 3:16',
@@ -115,6 +133,19 @@ class ESVBibleButton extends PanelMenu.Button {
         navBox.add_child(this._nextBtn);
         navItem.add_child(navBox);
         this.menu.addMenuItem(navItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Bible Browser window
+        const browserItem = new PopupMenu.PopupMenuItem(_('Open Bible Browser…'));
+        browserItem.connect('activate', () => {
+            this.menu.close();
+            launchBibleBrowser(
+                this._extension.path,
+                this._settings.get_string('api-key')
+            );
+        });
+        this.menu.addMenuItem(browserItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
