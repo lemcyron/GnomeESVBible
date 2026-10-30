@@ -11,32 +11,35 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // ─── Bible Browser launcher ───────────────────────────────────────────────────
-// Uses GLib.spawn_async — the only method that reliably works from inside the
-// GNOME Shell extension sandbox on Arch Linux / mainline kernel.
-// The API key is passed as an environment variable in the envp array.
+// Runs bible-browser.js as a separate gjs process (GTK4 can't run inside the
+// shell process). The API key is passed via the child's environment only.
 function launchBibleBrowser(extensionPath, apiKey) {
     const scriptPath = GLib.build_filenamev([extensionPath, 'bible-browser.js']);
 
-    // Find gjs absolute path (Arch: /usr/bin/gjs)
-    const gjsBin = GLib.find_program_in_path('gjs') ?? '/usr/bin/gjs';
-
-    // Build envp: inherit current environment + inject ESV_API_KEY
-    const envp = GLib.get_environ();
-    GLib.environ_setenv(envp, 'ESV_API_KEY', apiKey || '', true);
-
-    // argv for GLib.spawn_async
-    const argv = [gjsBin, '-m', scriptPath];
-
     try {
-        GLib.spawn_async(
-            null,           // working directory (inherit)
-            argv,           // ['gjs', '-m', '/path/to/bible-browser.js']
-            envp,           // environment with ESV_API_KEY set
-            GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD,
-            null,           // child setup func
-        );
+        const gjsBin = GLib.find_program_in_path('gjs') ?? '/usr/bin/gjs';
+
+        const launcher = new Gio.SubprocessLauncher({
+            flags: Gio.SubprocessFlags.STDERR_PIPE,
+        });
+        launcher.setenv('ESV_API_KEY', apiKey || '', true);
+
+        const proc = launcher.spawnv([gjsBin, scriptPath]);
+
+        // Surface startup failures instead of failing silently
+        proc.communicate_utf8_async(null, null, (p, res) => {
+            try {
+                const [, , stderr] = p.communicate_utf8_finish(res);
+                if (!p.get_successful()) {
+                    console.error(`[ESVBible] bible-browser exited abnormally:\n${stderr}`);
+                    Main.notify('ESV Bible', 'Bible Browser failed to start. See journalctl for details.');
+                }
+            } catch (e) {
+                console.error('[ESVBible] bible-browser wait failed:', e);
+            }
+        });
     } catch (e) {
-        Main.notify('ESV Bible', `Could not open Bible Browser: ${e.message}`);
+        Main.notify('ESV Bible', 'Could not open Bible Browser.');
         console.error('[ESVBible] launchBibleBrowser:', e);
     }
 }
