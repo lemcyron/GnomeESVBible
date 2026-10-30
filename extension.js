@@ -11,20 +11,38 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // ─── Bible Browser launcher ───────────────────────────────────────────────────
-// Spawns bible-browser.js as a separate GJS process so it can open a GTK4
-// window outside the shell compositor process.
+// Spawns bible-browser.js as a separate GJS ESM process.
+// The API key is passed via the ESV_API_KEY environment variable because
+// ARGV is not available in GJS ESM (-m) mode.
 function launchBibleBrowser(extensionPath, apiKey) {
     const scriptPath = GLib.build_filenamev([extensionPath, 'bible-browser.js']);
+
+    // Build an environment that inherits everything + our key
+    const envList = GLib.get_environ();
+    const envWithKey = GLib.environ_setenv(envList, 'ESV_API_KEY', apiKey || '', true);
+
     try {
-        const proc = Gio.Subprocess.new(
-            ['gjs', '-m', scriptPath, '--api-key', apiKey || ''],
-            Gio.SubprocessFlags.NONE
+        const proc = Gio.Subprocess.new_with_fds_and_env(
+            ['gjs', '-m', scriptPath],
+            Gio.SubprocessFlags.NONE,
+            -1, -1, -1,
+            envWithKey
         );
-        // We don't need to wait for it; it manages its own event loop.
+        // Fire and forget — the browser manages its own GLib main loop.
         proc.wait_async(null, null);
-    } catch (e) {
-        Main.notify('ESV Bible', `Could not open Bible Browser: ${e.message}`);
-        console.error('[ESVBible] launchBibleBrowser:', e);
+    } catch (_e) {
+        // Fallback: try without explicit env (key may already be in shell env)
+        try {
+            const launcher = new Gio.SubprocessLauncher({
+                flags: Gio.SubprocessFlags.NONE,
+            });
+            launcher.setenv('ESV_API_KEY', apiKey || '', true);
+            const proc2 = launcher.spawnv(['gjs', '-m', scriptPath]);
+            proc2.wait_async(null, null);
+        } catch (e2) {
+            Main.notify('ESV Bible', `Could not open Bible Browser: ${e2.message}`);
+            console.error('[ESVBible] launchBibleBrowser:', e2);
+        }
     }
 }
 
@@ -54,20 +72,12 @@ class ESVBibleButton extends PanelMenu.Button {
         this._currentVerseIndex = 0;
         this._cachedVerses = [];
 
-        // ── Panel icon + label ──
-        const hbox = new St.BoxLayout({style_class: 'panel-status-menu-box'});
+        // ── Panel icon only ──
         const icon = new St.Icon({
             icon_name: 'accessories-dictionary-symbolic',
             style_class: 'system-status-icon',
         });
-        this._verseLabel = new St.Label({
-            text: _('ESV…'),
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'esv-panel-label',
-        });
-        hbox.add_child(icon);
-        hbox.add_child(this._verseLabel);
-        this.add_child(hbox);
+        this.add_child(icon);
 
         // ── Popup menu ──
         this._buildMenu();
@@ -99,7 +109,44 @@ class ESVBibleButton extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Navigation row
+        // ── Verse search row ──
+        const searchItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
+        const searchBox = new St.BoxLayout({
+            x_expand: true,
+            style_class: 'esv-search-box',
+        });
+        this._searchEntry = new St.Entry({
+            hint_text: _('e.g. John 3:16'),
+            can_focus: true,
+            x_expand: true,
+            style_class: 'esv-search-entry',
+        });
+        this._searchEntry.clutter_text.connect('activate', () => {
+            const query = this._searchEntry.get_text().trim();
+            if (query) {
+                this._searchEntry.set_text('');
+                this._fetchVerse(query);
+            }
+        });
+        const goBtn = new St.Button({
+            label: _('Go'),
+            style_class: 'esv-nav-btn',
+        });
+        goBtn.connect('clicked', () => {
+            const query = this._searchEntry.get_text().trim();
+            if (query) {
+                this._searchEntry.set_text('');
+                this._fetchVerse(query);
+            }
+        });
+        searchBox.add_child(this._searchEntry);
+        searchBox.add_child(goBtn);
+        searchItem.add_child(searchBox);
+        this.menu.addMenuItem(searchItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // ── Navigation row (prev / next) ──
         const navItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
         const navBox = new St.BoxLayout({
             x_expand: true,
@@ -108,28 +155,20 @@ class ESVBibleButton extends PanelMenu.Button {
         });
 
         this._prevBtn = new St.Button({
-            label: '◀',
+            label: '◀  ' + _('Prev'),
             style_class: 'esv-nav-btn',
             x_expand: true,
         });
         this._prevBtn.connect('clicked', () => this._navigate(-1));
 
         this._nextBtn = new St.Button({
-            label: '▶',
+            label: _('Next') + '  ▶',
             style_class: 'esv-nav-btn',
             x_expand: true,
         });
         this._nextBtn.connect('clicked', () => this._navigate(1));
 
-        this._randomBtn = new St.Button({
-            label: _('Random'),
-            style_class: 'esv-nav-btn',
-            x_expand: true,
-        });
-        this._randomBtn.connect('clicked', () => this._fetchRandom());
-
         navBox.add_child(this._prevBtn);
-        navBox.add_child(this._randomBtn);
         navBox.add_child(this._nextBtn);
         navItem.add_child(navBox);
         this.menu.addMenuItem(navItem);
@@ -214,7 +253,6 @@ class ESVBibleButton extends PanelMenu.Button {
         const message = Soup.Message.new('GET', url);
         message.request_headers.append('Authorization', `Token ${this._apiKey.trim()}`);
 
-        this._verseLabel.text = _('Loading…');
         this._referenceItem.label.text = ref;
         this._verseItem.label.text = _('Fetching…');
 
@@ -258,12 +296,6 @@ class ESVBibleButton extends PanelMenu.Button {
         );
     }
 
-    _fetchRandom() {
-        const idx = Math.floor(Math.random() * this._versePool.length);
-        this._currentVerseIndex = idx;
-        this._fetchVerse();
-    }
-
     _navigate(direction) {
         this._currentVerseIndex = (
             (this._currentVerseIndex + direction + this._versePool.length) % this._versePool.length
@@ -275,18 +307,12 @@ class ESVBibleButton extends PanelMenu.Button {
         this._referenceItem.label.text = reference;
         this._verseItem.label.text = text;
 
-        const snippet = text.length > 40 ? text.substring(0, 37) + '…' : text;
-        this._verseLabel.text = this._showInPanel
-            ? `📖 ${reference}: ${snippet}`
-            : '📖 ESV';
-
         // Cache
         this._cachedVerses.push({reference, text});
         if (this._cachedVerses.length > 50) this._cachedVerses.shift();
     }
 
     _showError(msg) {
-        this._verseLabel.text = '📖 ESV';
         this._referenceItem.label.text = _('Error');
         this._verseItem.label.text = msg;
     }
