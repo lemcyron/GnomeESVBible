@@ -161,24 +161,20 @@ app.connect('activate', () => {
         .esv-col-header {
             font-weight: bold;
             font-size: 0.8em;
-            letter-spacing: 1px;
-            color: alpha(currentColor, 0.55);
             padding: 8px 12px 6px 12px;
+            opacity: 0.6;
         }
 
         /* Vertical separator between columns */
         .esv-col {
-            border-right: 1px solid alpha(currentColor, 0.12);
+            border-right: 1px solid rgba(128,128,128,0.25);
         }
 
         /* Verse rows — hover tint */
-        .esv-verse-list row.esv-verse-row {
-            transition: background-color 80ms ease;
-        }
         .esv-verse-list row.esv-verse-row:hover {
-            background-color: alpha(#7e3ebe, 0.12);
-            cursor: pointer;
+            background-color: rgba(126,62,190,0.12);
         }
+
         /* Purple selection on verse rows */
         .esv-verse-list row.esv-verse-row:selected,
         .esv-verse-list row.esv-verse-row:selected:focus {
@@ -198,13 +194,12 @@ app.connect('activate', () => {
             margin-top: 2px;
         }
         .esv-verse-list row:selected .esv-verse-num {
-            color: rgba(255,255,255,0.75);
+            color: rgba(255,255,255,0.8);
         }
 
         /* Verse text */
         .esv-verse-text-lbl {
             font-size: 14px;
-            line-height: 1.7;
         }
 
         /* "✓ Copied" transient badge */
@@ -515,7 +510,7 @@ app.connect('activate', () => {
             ? `${row._reference}:${row._verseNum}`
             : row._reference;
         const clip = `${row._verseText} — ${ref} (ESV)`;
-        win.get_clipboard().set(clip);
+        win.get_clipboard().set_text(clip);
 
         // Show "✓ Copied" badge briefly on the clicked row
         const rowBox = row.get_child();
@@ -583,7 +578,7 @@ app.connect('activate', () => {
         const full = currentVerses
             .map(v => v.num ? `[${v.num}] ${v.text}` : v.text)
             .join('\n');
-        win.get_clipboard().set(`${full}\n\n— ${passageTitle.label} (ESV)`);
+        win.get_clipboard().set_text(`${full}\n\n— ${passageTitle.label} (ESV)`);
         copyBtn.set_icon_name('object-select-symbolic');
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1400, () => {
             copyBtn.set_icon_name('edit-copy-symbolic');

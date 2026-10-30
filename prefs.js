@@ -71,14 +71,6 @@ export default class ESVBiblePreferences extends ExtensionPreferences {
         });
         page.add(displayGroup);
 
-        // Show verse snippet in panel
-        const panelRow = new Adw.SwitchRow({
-            title: _('Show verse snippet in panel bar'),
-            subtitle: _('Displays a short preview of the verse next to the icon'),
-        });
-        settings.bind('show-verse-in-panel', panelRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        displayGroup.add(panelRow);
-
         // Auto-refresh
         const refreshRow = new Adw.SpinRow({
             title: _('Auto-refresh interval (minutes)'),

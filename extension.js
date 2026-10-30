@@ -12,37 +12,23 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // ─── Bible Browser launcher ───────────────────────────────────────────────────
 // Spawns bible-browser.js as a separate GJS ESM process.
-// The API key is passed via the ESV_API_KEY environment variable because
-// ARGV is not available in GJS ESM (-m) mode.
+// The API key is passed via the ESV_API_KEY environment variable using
+// Gio.SubprocessLauncher, which is the correct GJS API for env manipulation.
 function launchBibleBrowser(extensionPath, apiKey) {
     const scriptPath = GLib.build_filenamev([extensionPath, 'bible-browser.js']);
-
-    // Build an environment that inherits everything + our key
-    const envList = GLib.get_environ();
-    const envWithKey = GLib.environ_setenv(envList, 'ESV_API_KEY', apiKey || '', true);
-
     try {
-        const proc = Gio.Subprocess.new_with_fds_and_env(
-            ['gjs', '-m', scriptPath],
-            Gio.SubprocessFlags.NONE,
-            -1, -1, -1,
-            envWithKey
-        );
-        // Fire and forget — the browser manages its own GLib main loop.
+        const launcher = new Gio.SubprocessLauncher({
+            flags: Gio.SubprocessFlags.NONE,
+        });
+        // Inherit the current environment then override ESV_API_KEY
+        launcher.set_environ(GLib.get_environ());
+        launcher.setenv('ESV_API_KEY', apiKey || '', true);
+        const proc = launcher.spawnv(['gjs', '-m', scriptPath]);
+        // Fire-and-forget: the browser has its own GLib main loop
         proc.wait_async(null, null);
-    } catch (_e) {
-        // Fallback: try without explicit env (key may already be in shell env)
-        try {
-            const launcher = new Gio.SubprocessLauncher({
-                flags: Gio.SubprocessFlags.NONE,
-            });
-            launcher.setenv('ESV_API_KEY', apiKey || '', true);
-            const proc2 = launcher.spawnv(['gjs', '-m', scriptPath]);
-            proc2.wait_async(null, null);
-        } catch (e2) {
-            Main.notify('ESV Bible', `Could not open Bible Browser: ${e2.message}`);
-            console.error('[ESVBible] launchBibleBrowser:', e2);
-        }
+    } catch (e) {
+        Main.notify('ESV Bible', `Could not open Bible Browser: ${e.message}`);
+        console.error('[ESVBible] launchBibleBrowser:', e);
     }
 }
 
@@ -216,7 +202,6 @@ class ESVBibleButton extends PanelMenu.Button {
     _loadSettings() {
         this._apiKey = this._settings.get_string('api-key');
         this._autoRefreshMins = this._settings.get_int('auto-refresh-minutes');
-        this._showInPanel = this._settings.get_boolean('show-verse-in-panel');
         this._customVerses = this._settings.get_strv('custom-verses');
 
         // Rebuild verse pool
@@ -307,6 +292,10 @@ class ESVBibleButton extends PanelMenu.Button {
         this._referenceItem.label.text = reference;
         this._verseItem.label.text = text;
 
+        // Auto-copy every fetched verse to clipboard
+        const clipboard = St.Clipboard.get_default();
+        clipboard.set_text(St.ClipboardType.CLIPBOARD, `${text} — ${reference} (ESV)`);
+
         // Cache
         this._cachedVerses.push({reference, text});
         if (this._cachedVerses.length > 50) this._cachedVerses.shift();
@@ -363,7 +352,7 @@ class ESVBibleButton extends PanelMenu.Button {
             this._refreshTimeout = null;
         }
         if (this._httpSession) {
-            this._httpSession.abort();
+            // Soup.Session has no abort() in libsoup3; just drop the reference.
             this._httpSession = null;
         }
         super.destroy();
