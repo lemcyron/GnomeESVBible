@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.esv-bible-verses"
+          path="/org/gnome/shell/extensions/esv-bible-verses/">
+
+    <!-- ESV.org API key -->
+    <key name="api-key" type="s">
+      <default>''</default>
+      <summary>ESV.org API Key</summary>
+      <description>
+        Your personal API token from https://api.esv.org.
+        Create a free account and generate a token under API Tokens.
+      </description>
+    </key>
+
+    <!-- Show a snippet of the current verse in the top panel bar -->
+    <key name="show-verse-in-panel" type="b">
+      <default>true</default>
+      <summary>Show verse snippet in the panel</summary>
+      <description>
+        When enabled, a short snippet of the current verse reference and
+        text is displayed beside the icon in the top panel bar.
+      </description>
+    </key>
+
+    <!-- Auto-refresh interval in minutes (0 = disabled) -->
+    <key name="auto-refresh-minutes" type="i">
+      <default>30</default>
+      <summary>Auto-refresh interval in minutes</summary>
+      <description>
+        How often (in minutes) the extension automatically advances to
+        the next verse in the list. Set to 0 to disable auto-refresh.
+      </description>
+      <range min="0" max="1440"/>
+    </key>
+
+    <!-- User-defined list of Bible references -->
+    <key name="custom-verses" type="as">
+      <default>[]</default>
+      <summary>Custom verse reference list</summary>
+      <description>
+        A list of Bible passage references (e.g. "John 3:16") to cycle
+        through. When empty the built-in default list is used.
+      </description>
+    </key>
+
+  </schema>
+</schemalist>

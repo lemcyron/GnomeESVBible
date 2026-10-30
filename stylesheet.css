@@ -1,0 +1,57 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ESV Bible Verses — GNOME Shell Extension Stylesheet
+   Compatible with GNOME Shell 45+
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Panel label ─────────────────────────────────────────────────────────── */
+.esv-panel-label {
+    font-size: 0.85em;
+    max-width: 260px;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+/* ── Popup menu verse reference ──────────────────────────────────────────── */
+.esv-reference {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: #d0a040;
+    padding-top: 4px;
+    padding-bottom: 2px;
+}
+
+/* ── Popup menu verse text ───────────────────────────────────────────────── */
+.esv-verse-text {
+    font-style: italic;
+    font-size: 1.0em;
+    max-width: 380px;
+    padding-top: 2px;
+    padding-bottom: 6px;
+    /* Allow text to wrap naturally */
+    -st-natural-width: 380px;
+}
+
+/* ── Navigation row ──────────────────────────────────────────────────────── */
+.esv-nav-box {
+    spacing: 8px;
+    padding: 4px 0;
+}
+
+.esv-nav-btn {
+    min-width: 72px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+    font-size: 0.9em;
+    text-align: center;
+}
+
+.esv-nav-btn:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+}
+
+.esv-nav-btn:active {
+    background-color: rgba(255, 255, 255, 0.28);
+}

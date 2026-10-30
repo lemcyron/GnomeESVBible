@@ -1,0 +1,10 @@
+{
+  "name": "ESV Bible Verses",
+  "description": "Displays ESV Bible verses in the GNOME panel. Fetches passages from the ESV.org API. Configure your API key in the extension preferences.",
+  "uuid": "esv-bible-verses@gnome-extension",
+  "version": 1,
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://api.esv.org",
+  "settings-schema": "org.gnome.shell.extensions.esv-bible-verses",
+  "gettext-domain": "esv-bible-verses"
+}
