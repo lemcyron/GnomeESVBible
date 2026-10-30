@@ -11,57 +11,30 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // ─── Bible Browser launcher ───────────────────────────────────────────────────
-// Writes a tiny shell wrapper to /tmp, then launches it via Gio.AppInfo so
-// that the GNOME Shell sandbox restrictions (no PATH, no env injection) are
-// bypassed cleanly.  The wrapper sets ESV_API_KEY and calls gjs -m.
+// Uses GLib.spawn_async — the only method that reliably works from inside the
+// GNOME Shell extension sandbox on Arch Linux / mainline kernel.
+// The API key is passed as an environment variable in the envp array.
 function launchBibleBrowser(extensionPath, apiKey) {
     const scriptPath = GLib.build_filenamev([extensionPath, 'bible-browser.js']);
 
-    // Locate gjs — try common paths in order
-    const gjsPaths = [
-        GLib.find_program_in_path('gjs'),
-        '/usr/bin/gjs',
-        '/usr/local/bin/gjs',
-        '/bin/gjs',
-    ];
-    const gjsBin = gjsPaths.find(p => p && GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
-    if (!gjsBin) {
-        Main.notify('ESV Bible', 'Cannot find gjs executable to open Bible Browser.');
-        return;
-    }
+    // Find gjs absolute path (Arch: /usr/bin/gjs)
+    const gjsBin = GLib.find_program_in_path('gjs') ?? '/usr/bin/gjs';
 
-    // Write a small shell wrapper to /tmp that sets the env var and execs gjs
-    const safe = (apiKey || '').replace(/'/g, "'\\''"); // shell-escape single quotes
-    const wrapper = [
-        '#!/bin/sh',
-        `export ESV_API_KEY='${safe}'`,
-        `exec '${gjsBin}' -m '${scriptPath}'`,
-    ].join('\n');
+    // Build envp: inherit current environment + inject ESV_API_KEY
+    const envp = GLib.get_environ();
+    GLib.environ_setenv(envp, 'ESV_API_KEY', apiKey || '', true);
 
-    const wrapperPath = GLib.build_filenamev([GLib.get_tmp_dir(), 'esv-bible-browser.sh']);
+    // argv for GLib.spawn_async
+    const argv = [gjsBin, '-m', scriptPath];
+
     try {
-        // Write wrapper via Gio.File (works in all GJS versions)
-        const file = Gio.File.new_for_path(wrapperPath);
-        const stream = file.replace(null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-        const bytes = new TextEncoder().encode(wrapper);
-        stream.write_bytes(new GLib.Bytes(bytes), null);
-        stream.close(null);
-
-        // chmod +x via unix::mode attribute
-        file.set_attribute_uint32(
-            'unix::mode',
-            0o755,
-            Gio.FileQueryInfoFlags.NONE,
-            null
+        GLib.spawn_async(
+            null,           // working directory (inherit)
+            argv,           // ['gjs', '-m', '/path/to/bible-browser.js']
+            envp,           // environment with ESV_API_KEY set
+            GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+            null,           // child setup func
         );
-
-        // Launch via Gio.AppInfo — works inside the shell sandbox
-        const appInfo = Gio.AppInfo.create_from_commandline(
-            wrapperPath,
-            'ESV Bible Browser',
-            Gio.AppInfoCreateFlags.NONE
-        );
-        appInfo.launch([], null);
     } catch (e) {
         Main.notify('ESV Bible', `Could not open Bible Browser: ${e.message}`);
         console.error('[ESVBible] launchBibleBrowser:', e);
