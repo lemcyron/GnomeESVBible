@@ -3,7 +3,6 @@ import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Soup from 'gi://Soup?version=3.0';
-import Clutter from 'gi://Clutter';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -144,71 +143,40 @@ class ESVBibleButton extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // ── Navigation row (prev / next) ──
-        const navItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
-        const navBox = new St.BoxLayout({
+        // ── Bible Browser / Preferences row ──
+        const actionItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
+        const actionBox = new St.BoxLayout({
             x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
             style_class: 'esv-nav-box',
         });
 
-        this._prevBtn = new St.Button({
-            label: '◀  ' + _('Prev'),
+        const browserBtn = new St.Button({
+            label: _('Open Bible Browser…'),
             style_class: 'esv-nav-btn',
             x_expand: true,
         });
-        this._prevBtn.connect('clicked', () => this._navigate(-1));
-
-        this._nextBtn = new St.Button({
-            label: _('Next') + '  ▶',
-            style_class: 'esv-nav-btn',
-            x_expand: true,
-        });
-        this._nextBtn.connect('clicked', () => this._navigate(1));
-
-        navBox.add_child(this._prevBtn);
-        navBox.add_child(this._nextBtn);
-        navItem.add_child(navBox);
-        this.menu.addMenuItem(navItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Bible Browser window
-        const browserItem = new PopupMenu.PopupMenuItem(_('Open Bible Browser…'));
-        browserItem.connect('activate', () => {
+        browserBtn.connect('clicked', () => {
             this.menu.close();
             launchBibleBrowser(
                 this._extension.path,
                 this._settings.get_string('api-key')
             );
         });
-        this.menu.addMenuItem(browserItem);
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Refresh
-        const refreshItem = new PopupMenu.PopupMenuItem(_('Refresh'));
-        refreshItem.connect('activate', () => this._fetchVerse());
-        this.menu.addMenuItem(refreshItem);
-
-        // Copy verse
-        const copyItem = new PopupMenu.PopupMenuItem(_('Copy Verse'));
-        copyItem.connect('activate', () => this._copyVerse());
-        this.menu.addMenuItem(copyItem);
-
-        // Open in Browser
-        const openItem = new PopupMenu.PopupMenuItem(_('Open on ESV.org'));
-        openItem.connect('activate', () => this._openInBrowser());
-        this.menu.addMenuItem(openItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Preferences
-        const prefItem = new PopupMenu.PopupMenuItem(_('Preferences…'));
-        prefItem.connect('activate', () => {
+        const prefBtn = new St.Button({
+            label: _('Preferences…'),
+            style_class: 'esv-nav-btn',
+            x_expand: true,
+        });
+        prefBtn.connect('clicked', () => {
+            this.menu.close();
             this._extension.openPreferences();
         });
-        this.menu.addMenuItem(prefItem);
+
+        actionBox.add_child(browserBtn);
+        actionBox.add_child(prefBtn);
+        actionItem.add_child(actionBox);
+        this.menu.addMenuItem(actionItem);
     }
 
     _loadSettings() {
@@ -316,25 +284,6 @@ class ESVBibleButton extends PanelMenu.Button {
     _showError(msg) {
         this._referenceItem.label.text = _('Error');
         this._verseItem.label.text = msg;
-    }
-
-    _copyVerse() {
-        const ref = this._referenceItem.label.text;
-        const verse = this._verseItem.label.text;
-        if (!verse || verse === _('Fetching…')) return;
-
-        const clipboard = St.Clipboard.get_default();
-        clipboard.set_text(St.ClipboardType.CLIPBOARD, `${verse} — ${ref} (ESV)`);
-
-        Main.notify(_('ESV Bible'), _('Verse copied to clipboard'));
-    }
-
-    _openInBrowser() {
-        const ref = this._referenceItem.label.text;
-        if (!ref || ref === _('Error')) return;
-        const encoded = GLib.uri_escape_string(ref, null, true);
-        const url = `https://www.esv.org/verses/${encoded}/`;
-        Gio.AppInfo.launch_default_for_uri(url, null);
     }
 
     _scheduleAutoRefresh() {

@@ -127,6 +127,64 @@ function fetchPassage(reference, callback) {
     });
 }
 
+// ─── Bookmarks (persisted as JSON in the user's config dir) ──────────────────
+const BOOKMARKS_DIR  = GLib.build_filenamev([GLib.get_user_config_dir(), 'esv-bible-verses']);
+const BOOKMARKS_PATH = GLib.build_filenamev([BOOKMARKS_DIR, 'bookmarks.json']);
+
+function bookmarkKey(bm) { return `${bm.book}|${bm.chapter}|${bm.verse}`; }
+
+function sortBookmarks(list) {
+    const idx = name => BIBLE_BOOKS.findIndex(b => b.name === name);
+    return list.sort((a, b) =>
+        idx(a.book) - idx(b.book) || a.chapter - b.chapter || a.verse - b.verse);
+}
+
+function loadBookmarks() {
+    try {
+        const [ok, bytes] = GLib.file_get_contents(BOOKMARKS_PATH);
+        if (!ok) return [];
+        const data = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+        if (!Array.isArray(data)) return [];
+        const seen = new Set();
+        const valid = [];
+        for (const bm of data) {
+            const book = BIBLE_BOOKS.find(b => b.name === bm?.book);
+            if (!book || !Number.isInteger(bm.chapter) || !Number.isInteger(bm.verse)) continue;
+            if (bm.chapter < 1 || bm.chapter > book.chapters || bm.verse < 1) continue;
+            const clean = {book: book.name, chapter: bm.chapter, verse: bm.verse};
+            if (seen.has(bookmarkKey(clean))) continue;
+            seen.add(bookmarkKey(clean));
+            valid.push(clean);
+        }
+        return sortBookmarks(valid);
+    } catch (e) {
+        return [];   // missing or unreadable file → start empty
+    }
+}
+
+function saveBookmarks(list) {
+    try {
+        GLib.mkdir_with_parents(BOOKMARKS_DIR, 0o700);
+        GLib.file_set_contents(BOOKMARKS_PATH, new TextEncoder().encode(JSON.stringify(list)));
+    } catch (e) {
+        printerr(`[ESVBible] Could not save bookmarks: ${e.message}`);
+    }
+}
+
+// Parse a single-chapter reference ("John 3", "Psalm 23:1-6") into {bookIdx, chapter}.
+// Returns null for anything that spans chapters or can't be matched to a book.
+function parseRef(ref) {
+    const m = ref.trim().match(/^(.+?)\s+(\d+)(?::[\d,\s\-–]+)?$/);
+    if (!m) return null;
+    const name = m[1].trim().toLowerCase();
+    const bookIdx = BIBLE_BOOKS.findIndex(b =>
+        b.name.toLowerCase() === name || (name === 'psalm' && b.name === 'Psalms'));
+    if (bookIdx < 0) return null;
+    const chapter = parseInt(m[2], 10);
+    if (chapter < 1 || chapter > BIBLE_BOOKS[bookIdx].chapters) return null;
+    return {bookIdx, chapter};
+}
+
 // ─── Parse verse-numbered text into [{num, text}] ────────────────────────────
 function parseVerses(raw) {
     const verses = [];
@@ -162,6 +220,7 @@ app.connect('activate', () => {
     const css = new Gtk.CssProvider();
     css.load_from_string(`
         .esv-col { border-right: 1px solid rgba(128,128,128,0.25); }
+        .esv-bm-col { border-left: 1px solid rgba(128,128,128,0.25); }
         .esv-col-header { font-weight: bold; font-size: 0.8em; padding: 8px 12px 6px 12px; opacity: 0.6; }
         .esv-col listbox row:selected { background-color: #7e3ebe; color: #ffffff; }
         .esv-col listbox row:selected label { color: #ffffff; }
@@ -199,12 +258,13 @@ app.connect('activate', () => {
     const rootBox = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
     rootBox.append(header);
 
-    const colsBox = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL, vexpand: true, hexpand: true});
+    // Homogeneous 20-unit grid → columns are exactly 20% / 15% / 50% / 15% of the window.
+    const colsBox = new Gtk.Grid({column_homogeneous: true, vexpand: true, hexpand: true});
     rootBox.append(colsBox);
 
     // ── Column helper ────────────────────────────────────────────────────────
-    function makeCol(title, width) {
-        const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, width_request: width, css_classes: ['esv-col']});
+    function makeCol(title) {
+        const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, hexpand: true, vexpand: true, css_classes: ['esv-col']});
         box.append(new Gtk.Label({label: title.toUpperCase(), xalign: 0, css_classes: ['esv-col-header']}));
         box.append(new Gtk.Separator({orientation: Gtk.Orientation.HORIZONTAL}));
         const scroll = new Gtk.ScrolledWindow({hscrollbar_policy: Gtk.PolicyType.NEVER, vscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vexpand: true, hexpand: true});
@@ -214,9 +274,9 @@ app.connect('activate', () => {
         return {box, list};
     }
 
-    // ── Col 1: Books ─────────────────────────────────────────────────────────
-    const {box: bookBox, list: bookList} = makeCol('Books', 190);
-    colsBox.append(bookBox);
+    // ── Col 1: Books (20%) ───────────────────────────────────────────────────
+    const {box: bookBox, list: bookList} = makeCol('Books');
+    colsBox.attach(bookBox, 0, 0, 4, 1);
     BIBLE_BOOKS.forEach((book, idx) => {
         const row = new Gtk.ListBoxRow({activatable: true});
         row._bookIdx = idx;
@@ -224,15 +284,22 @@ app.connect('activate', () => {
         bookList.append(row);
     });
 
-    // ── Col 2: Chapters ──────────────────────────────────────────────────────
-    const {box: chapBox, list: chapList} = makeCol('Chapters', 130);
-    colsBox.append(chapBox);
+    // ── Col 2: Chapters (15%) ────────────────────────────────────────────────
+    const {box: chapBox, list: chapList} = makeCol('Chapters');
+    colsBox.attach(chapBox, 4, 0, 3, 1);
 
-    // ── Col 3: Verses ────────────────────────────────────────────────────────
+    // ── Col 3: Verses (50%) ──────────────────────────────────────────────────
     const readBox = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, vexpand: true, hexpand: true});
-    colsBox.append(readBox);
+    colsBox.attach(readBox, 7, 0, 10, 1);
 
-    const titleLbl = new Gtk.Label({label: 'Select a book and chapter', css_classes: ['title-3'], xalign: 0, margin_start: 20, margin_end: 20, margin_top: 14, margin_bottom: 10});
+    // ── Col 4: Bookmarks (15%) ───────────────────────────────────────────────
+    const {box: bmBox, list: bmList} = makeCol('Bookmarks');
+    bmBox.remove_css_class('esv-col');   // rightmost column: border on the left instead
+    bmBox.add_css_class('esv-bm-col');
+    bmList.set_selection_mode(Gtk.SelectionMode.NONE);
+    colsBox.attach(bmBox, 17, 0, 3, 1);
+
+    const titleLbl = new Gtk.Label({label: 'Select a book and chapter', css_classes: ['title-3'], xalign: 0, ellipsize: 3, margin_start: 20, margin_end: 20, margin_top: 14, margin_bottom: 10});
     readBox.append(titleLbl);
     readBox.append(new Gtk.Separator({orientation: Gtk.Orientation.HORIZONTAL}));
 
@@ -249,6 +316,49 @@ app.connect('activate', () => {
     let selectedBook = null;
     let pulseId = null;
     let currentVerses = [];
+    let suppressChapterLoad = false;
+    let bookmarks = loadBookmarks();
+
+    function isBookmarked(bm) { return bookmarks.some(b => bookmarkKey(b) === bookmarkKey(bm)); }
+
+    function refreshStars() {
+        let c = verseList.get_first_child();
+        while (c) {
+            if (c._starBtn) c._starBtn.set_icon_name(isBookmarked(c._bm) ? 'starred-symbolic' : 'non-starred-symbolic');
+            c = c.get_next_sibling();
+        }
+    }
+
+    function removeBookmark(bm) {
+        bookmarks = bookmarks.filter(b => bookmarkKey(b) !== bookmarkKey(bm));
+        saveBookmarks(bookmarks);
+        rebuildBookmarks();
+        refreshStars();
+    }
+
+    function toggleBookmark(bm) {
+        if (isBookmarked(bm)) { removeBookmark(bm); return; }
+        bookmarks = sortBookmarks([...bookmarks, bm]);
+        saveBookmarks(bookmarks);
+        rebuildBookmarks();
+        refreshStars();
+    }
+
+    function rebuildBookmarks() {
+        let c = bmList.get_first_child();
+        while (c) { const n = c.get_next_sibling(); bmList.remove(c); c = n; }
+        bookmarks.forEach(bm => {
+            const row = new Gtk.ListBoxRow({activatable: true});
+            row._bm = bm;
+            const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL, spacing: 4, margin_start: 12, margin_end: 4, margin_top: 2, margin_bottom: 2});
+            box.append(new Gtk.Label({label: `${bm.book} ${bm.chapter}:${bm.verse}`, xalign: 0, hexpand: true, ellipsize: 3}));
+            const rm = new Gtk.Button({icon_name: 'window-close-symbolic', tooltip_text: 'Remove bookmark', css_classes: ['flat', 'circular'], valign: Gtk.Align.CENTER});
+            rm.connect('clicked', () => removeBookmark(bm));
+            box.append(rm);
+            row.set_child(box);
+            bmList.append(row);
+        });
+    }
 
     function clearList() {
         let c = verseList.get_first_child();
@@ -278,6 +388,7 @@ app.connect('activate', () => {
         clearList();
         currentVerses = verses;
         if (!verses.length) { showError('No verses found.'); return; }
+        const parsed = parseRef(ref);
         verses.forEach(verse => {
             const row = new Gtk.ListBoxRow({activatable: true, selectable: true, css_classes: ['esv-verse-row']});
             row._verseNum  = verse.num;
@@ -292,12 +403,43 @@ app.connect('activate', () => {
             const badge = new Gtk.Label({label: '✓ Copied', css_classes: ['esv-copied-badge'], visible: false, valign: Gtk.Align.CENTER});
             box.append(badge);
             row._badge = badge;
+            if (parsed && verse.num) {
+                const bm = {book: BIBLE_BOOKS[parsed.bookIdx].name, chapter: parsed.chapter, verse: parseInt(verse.num, 10)};
+                const star = new Gtk.Button({
+                    icon_name: isBookmarked(bm) ? 'starred-symbolic' : 'non-starred-symbolic',
+                    tooltip_text: 'Bookmark verse',
+                    css_classes: ['flat', 'circular'],
+                    valign: Gtk.Align.START,
+                });
+                star.connect('clicked', () => toggleBookmark(bm));
+                box.append(star);
+                row._bm = bm;
+                row._starBtn = star;
+            }
             row.set_child(box);
             verseList.append(row);
         });
     }
 
-    function loadPassage(ref) {
+    // Select (and scroll to) a verse in the current passage.
+    function selectVerse(num) {
+        let c = verseList.get_first_child();
+        while (c) {
+            if (c._verseNum === num) {
+                verseList.select_row(c);
+                c.grab_focus();
+                return;
+            }
+            c = c.get_next_sibling();
+        }
+    }
+
+    function selectVerseSoon(num) {
+        // Wait for layout so the row can be scrolled into view.
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => { selectVerse(num); return GLib.SOURCE_REMOVE; });
+    }
+
+    function loadPassage(ref, focusVerse = null) {
         titleLbl.label = ref;
         startLoading();
         fetchPassage(ref, (text, err) => {
@@ -305,8 +447,29 @@ app.connect('activate', () => {
             if (err) { showError(err); return; }
             populateVerses(parseVerses(text), ref);
             verseScroll.get_vadjustment().set_value(0);
+            if (focusVerse) selectVerseSoon(focusVerse);
         });
     }
+
+    // ── Bookmark → navigate to verse ─────────────────────────────────────────
+    function goToBookmark(bm) {
+        const bookIdx = BIBLE_BOOKS.findIndex(b => b.name === bm.book);
+        if (bookIdx < 0) return;
+        const ref = `${bm.book} ${bm.chapter}`;
+        const verse = String(bm.verse);
+
+        // Sync the book/chapter columns without triggering extra fetches.
+        suppressChapterLoad = true;
+        bookList.select_row(bookList.get_row_at_index(bookIdx));
+        chapList.select_row(chapList.get_row_at_index(bm.chapter - 1));
+        suppressChapterLoad = false;
+
+        if (titleLbl.label === ref && currentVerses.length) selectVerseSoon(verse);
+        else loadPassage(ref, verse);
+    }
+
+    bmList.connect('row-activated', (_lb, row) => { if (row._bm) goToBookmark(row._bm); });
+    rebuildBookmarks();
 
     // ── Click verse → copy ───────────────────────────────────────────────────
     verseList.connect('row-activated', (_lb, row) => {
@@ -337,7 +500,7 @@ app.connect('activate', () => {
 
     // ── Chapter → Verses ─────────────────────────────────────────────────────
     chapList.connect('row-selected', (_lb, row) => {
-        if (!row || !selectedBook) return;
+        if (suppressChapterLoad || !row || !selectedBook) return;
         loadPassage(`${selectedBook.name} ${row._chapter}`);
     });
 
